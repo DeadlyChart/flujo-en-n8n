@@ -1,0 +1,565 @@
+{
+  "name": "Sistema MAIL notion",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {}
+      },
+      "id": "b6a3ecb6-347d-4bd3-835b-2423da48f1ef",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "nQ5R6orZrcSSAn8H",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "databasePage",
+        "dataSourceId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "3ed91322-724e-8040-9c68-000b0a385920",
+          "cachedResultName": "Gestion Consultas IA"
+        },
+        "title": "={{ $json.From.split(\"<\")[0].trim() || $json.From }}",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "MAIL|email",
+              "emailValue": "={{ ($json.From.match(/<([^>]+)>/) || [])[1] || $json.From }}"
+            },
+            {
+              "key": "Mensaje|rich_text",
+              "textContent": "={{ $json.Subject }}\n\n{{ $json.snippet }}"
+            },
+            {
+              "key": "Fecha|date",
+              "date": "={{ DateTime.fromMillis(Number($json.internalDate)).toISO() }}"
+            },
+            {
+              "key": "Estado|multi_select",
+              "multiSelectValue": "Pendiente"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "639b947d-97a4-4e50-bf95-af6c7ce41de5",
+      "name": "Create a page",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 3,
+      "position": [
+        448,
+        0
+      ],
+      "credentials": {
+        "notionOAuth2Api": {
+          "id": "movYAGHMcQMc2g77",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Analiza el correo recibido.\n\nRemitente:\n{{ $('Gmail Trigger').item.json.From }}\n\nAsunto:\n{{ $('Gmail Trigger').item.json.Subject }}\n\nInformación disponible del correo:\n{{ $('Gmail Trigger').item.json.snippet }}\n\nClasifica el correo y genera una respuesta profesional.\n\nDevuelve únicamente un objeto JSON válido, sin explicaciones, sin Markdown y sin bloques de código:\n\n{\n  \"categoria\": \"Consulta|Reclamo|Soporte|Otro\",\n  \"prioridad\": \"Alta|Media|Baja\",\n  \"respuesta\": \"respuesta profesional para el cliente\"\n}\n\nNo inventes información que no aparezca en el correo.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        672,
+        0
+      ],
+      "id": "2d879fd1-f209-49a4-a620-54d4383a9122",
+      "name": "AI Agent",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        544,
+        208
+      ],
+      "id": "ea5538a7-1f37-44ba-ac8d-0098ed10b089",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": null,
+          "name": "",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": {
+          "__rl": true,
+          "value": "={{ $('Create a page').item.json.id }}",
+          "mode": "id"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Categoria|multi_select",
+              "multiSelectValue": "={{ JSON.parse($('AI Agent').item.json.output.replace('```json','').replace('```','').trim()).categoria }}"
+            },
+            {
+              "key": "Prioridad|multi_select",
+              "multiSelectValue": "={{ JSON.parse($('AI Agent').item.json.output.replace('```json','').replace('```','').trim()).prioridad }}"
+            },
+            {
+              "key": "Respuesta IA|rich_text",
+              "textContent": "={{ JSON.parse($('AI Agent').item.json.output.replace('```json','').replace('```','').trim()).respuesta }}"
+            },
+            {
+              "key": "Estado|multi_select",
+              "multiSelectValue": "Procesado por IA"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 3,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "f523cab9-62e0-4e01-8fcf-63267af59255",
+      "name": "Update a database page",
+      "credentials": {
+        "notionOAuth2Api": {
+          "id": "movYAGHMcQMc2g77",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "lucacucco08@gmail.com",
+        "subject": "=Aprobación de respuesta IA - {{ $('Gmail Trigger').item.json.Subject }}",
+        "message": "=Se generó una respuesta automática para el siguiente correo:\n\nAsunto: {{ $('Gmail Trigger').item.json.Subject }}\n\nRespuesta propuesta:\n\n{{ JSON.parse($('AI Agent').item.json.output).respuesta }}\n\nPor favor, revisá la respuesta y elegí si querés aprobarla o rechazarla.",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1488,
+        0
+      ],
+      "id": "3a8e836d-e3a4-4ac7-a94f-10e6b6311d35",
+      "name": "Send message and wait for response",
+      "webhookId": "6e5154b8-cd7d-40ec-b887-70a8184b1a17",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "nQ5R6orZrcSSAn8H",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "809d8173-ea07-4b50-927e-6020ed9ad68f",
+              "leftValue": "={{ $json.data.approved }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1712,
+        0
+      ],
+      "id": "c7d9cf13-9784-4b94-a5ea-8916e6d12010",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Gmail Trigger').item.json.From }}",
+        "subject": "=Re: {{ $('Gmail Trigger').item.json.Subject }}",
+        "message": "={{ JSON.parse($('AI Agent').item.json.output).respuesta }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1936,
+        -48
+      ],
+      "id": "35ee42e0-85db-48f6-91c6-b98cd68919ac",
+      "name": "Send a message",
+      "webhookId": "86385684-5f04-473d-a137-67db8c791880",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "nQ5R6orZrcSSAn8H",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": {
+          "__rl": true,
+          "value": "={{ $('Create a page').item.json.id }}",
+          "mode": "id"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Estado|multi_select",
+              "multiSelectValue": "Aprobado"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 3,
+      "position": [
+        2160,
+        -48
+      ],
+      "id": "19ef13e4-5243-4572-9cfd-718ea0620367",
+      "name": "Update a database page1",
+      "credentials": {
+        "notionOAuth2Api": {
+          "id": "movYAGHMcQMc2g77",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": {
+          "__rl": true,
+          "value": "={{ $('Create a page').item.json.id }}",
+          "mode": "id"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Estado|multi_select",
+              "multiSelectValue": "Rechazado"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 3,
+      "position": [
+        1936,
+        96
+      ],
+      "id": "706b1c1b-e76e-4380-a906-a6e958cc333c",
+      "name": "Update a database page2",
+      "credentials": {
+        "notionOAuth2Api": {
+          "id": "movYAGHMcQMc2g77",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": {
+          "__rl": true,
+          "value": "={{ $('Create a page').item.json.id }}",
+          "mode": "id"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Estado|multi_select",
+              "multiSelectValue": "Error"
+            },
+            {
+              "key": "Error|rich_text",
+              "textContent": "={{ $json.error.message }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 3,
+      "position": [
+        1088,
+        144
+      ],
+      "id": "f2feb56f-26ab-4e8c-8829-27132cf8a92c",
+      "name": "Update a database page3",
+      "credentials": {
+        "notionOAuth2Api": {
+          "id": "movYAGHMcQMc2g77",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Estado|multi_select",
+              "multiSelectValue": "Esperando respuesta"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 3,
+      "position": [
+        1264,
+        0
+      ],
+      "id": "85d9c0ff-6034-4c25-9b50-0f1fce64ccfe",
+      "name": "Update a database page4",
+      "credentials": {
+        "notionOAuth2Api": {
+          "id": "movYAGHMcQMc2g77",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "9209a1b6-a5f4-4a66-b10d-e55d4493bc55",
+              "leftValue": "={{ $json.labels.some(label => label.id === 'SENT') }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        224,
+        0
+      ],
+      "id": "7d600761-b72e-46fc-867b-19c1a867edab",
+      "name": "If1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a page": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Update a database page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update a database page3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a database page": {
+      "main": [
+        [
+          {
+            "node": "Update a database page4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send message and wait for response": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update a database page2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Update a database page1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a database page4": {
+      "main": [
+        [
+          {
+            "node": "Send message and wait for response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Create a page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "f07e3ff1-af4f-432c-86ab-dd1846032cbc",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "33ae3063bb32305fd16b28ea314de16bbd017e7ce85f7065116172f68b764919"
+  },
+  "nodeGroups": [],
+  "id": "7HuJuGRWAHbWD3Zo",
+  "tags": []
+}
